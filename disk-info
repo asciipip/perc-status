@@ -86,6 +86,9 @@ class Controller:
 
         controllers[self.id] = self
 
+    def __repr__(self):
+        return '<Controller(%s)>' % self.id
+
     def __cmp__(self, other):
         return cmp(self.controller_num, other.controller_num)
 
@@ -94,37 +97,40 @@ class Controller:
         return self.controller_num
 
 class VDisk:
-    def __init__(self, storage_object, controllers, vdisks):
+    def __init__(self, storage_object, controller_num, controllers, vdisks):
         assert(773 == get_field(storage_object, 'ObjType'))
         self.state  = State(get_field(storage_object, 'ObjState'))
         self.status = Status(get_field(storage_object, 'ObjStatus'))
         self.attributes_mask = get_field(storage_object, 'AttributesMask')
         self.name            = get_field(storage_object, 'Name'          )
-        self.controller_num  = get_field(storage_object, 'ControllerNum' )
+        self.controller_num  = controller_num
         self.device_name     = get_field(storage_object, 'DeviceName'    )
 
         self.array_num       = get_field(storage_object, 'ArrayNum'      )
         self.logical_drive_num = get_field(storage_object, 'LogicalDriveNum')
         self.parent_vd_id    = get_field(storage_object, 'ParentVDID'    )
+        self.span_num        = get_field(storage_object, 'SpanNum'       )
 
         self.layout = VDLayout(get_field(storage_object, 'Layout'))
 
-        if self.controller_num != None:
-            self.controller = controllers[self.controller_num]
-            self.controller.vdisks.append(self)
+        self.controller = controllers[self.controller_num]
+        self.controller.vdisks.append(self)
 
-        self.children = []
+        self.parent = None
+        self.children = {}
         for vd in vdisks.values():
-            if self.parent_vd_id != None and vd.logical_drive_num == self.parent_vd_id:
-                self.parent_vd = vd
-                vd.children.append(self)
-                self.controller = vd.controller
-                self.controller.vdisks.append(self)
-            if vd.parent_vd_id != None and self.logical_drive_num == vd.parent_vd_id:
-                vd.parent_vd = self
-                self.children.append(vd)
-                vd.controller = self.controller
-                vd.controller.vdisks.append(vd)
+            if self.parent_vd_id != None and \
+                    vd.controller_num == self.controller_num and \
+                    vd.logical_drive_num == self.parent_vd_id:
+                # This vdisk is our parent.
+                self.parent = vd
+                vd.children[self.array_num] = self
+            elif vd.parent_vd_id != None and \
+                    self.controller_num == vd.controller_num and \
+                    self.logical_drive_num == vd.parent_vd_id:
+                # This vdisk is our child.
+                vd.parent = self
+                self.children[vd.array_num] = vd
         self.pdisks = []
 
         vdisks[self.id] = self
@@ -144,15 +150,26 @@ class VDisk:
     @property
     def display_id(self):
         return '%s' % (self.logical_drive_num)
-        
+
+    @property
+    def is_parent(self):
+        return len(self.children) > 0
+
+    @property
+    def is_child(self):
+        return self.parent != None
+
     def add_pdisk(self, storage_object, pdisks):
         key = '%s;%s:%s:%s' % (get_field(storage_object, 'ControllerNum'),
                                get_field(storage_object, 'Channel'),
                                get_field(storage_object, 'EnclosureID'),
                                get_field(storage_object, 'TargetID'))
         pdisk = pdisks[key]
-        self.pdisks.append(pdisk)
-        pdisk.vdisk = self
+        if len(self.children) > 0 and pdisk.array_num != None:
+            pdisk.vdisk = self.children[pdisk.array_num]
+        else:
+            pdisk.vdisk = self
+        pdisk.vdisk.pdisks.append(pdisk)
     
 
 class PDisk:
@@ -233,7 +250,7 @@ for controller in controllers.values():
     et_virtual_disks = root.find('VirtualDisks')
     if et_virtual_disks:
         for obj in et_virtual_disks.findall('DCStorageObject'):
-            VDisk(obj, controllers, vdisks)
+            VDisk(obj, controller.controller_num, controllers, vdisks)
 
 # Get all of the disks across all of the controllers.
 pdisks = {}
@@ -251,7 +268,7 @@ disk_list = sorted(pdisks.values())
 
 # Assign pdisks to vdisks.
 for vdisk in vdisks.values():
-    if vdisk.controller_num != None:
+    if not vdisk.is_child:
         omr = subprocess.Popen(['/opt/dell/srvadmin/bin/omreport', 'storage', 'pdisk', 'controller=%d' % vdisk.controller_num, 'vdisk=%d' % vdisk.logical_drive_num, '-fmt', 'xml'],
                                stdout=subprocess.PIPE)
         stdout, ignored = omr.communicate()
@@ -260,12 +277,15 @@ for vdisk in vdisks.values():
             vdisk.add_pdisk(obj, pdisks)
 
 max_indent = 3
+for vd in vdisks.values():
+    if vd.is_parent:
+        max_indent = 4
 id_width = max(max([len(pd.display_id) for pd in pdisks.values()]),
-               max([len(vd.layout.name) for vd in vdisks.values()]))
+               max([len(vd.layout.name) for vd in vdisks.values() if not vd.is_child]))
 state_width = max(max([len(pd.state.name) for pd in pdisks.values()]),
-                  max([len(vd.state.name) for vd in vdisks.values()]))
+                  max([len(vd.state.name) for vd in vdisks.values() if not vd.is_child]))
 status_width = max(max([len(pd.status.name) for pd in pdisks.values()]),
-                   max([len(vd.status.name) for vd in vdisks.values()]))
+                   max([len(vd.status.name) for vd in vdisks.values() if not vd.is_child]))
 def print_pd_info(pd, indent):
     extra_info = ''
     if pd.progress != None:
@@ -280,13 +300,22 @@ def print_pd_info(pd, indent):
 for c in sorted(controllers.values()):
     print '%s (%s)  %s  %s' % (c.name, c.id, c.state.name, c.status.name)
     for vd in sorted(c.vdisks):
+        if vd.parent:
+            continue
         print '  %s (%s) at %s' % (vd.name, vd.display_id, vd.device_name)
-        print '    %s  %s  %s' % (vd.layout.name.ljust(id_width + 2),
+        print '    %s  %s  %s' % (vd.layout.name.ljust(id_width + 2 * (max_indent - 2)),
                                   vd.state.name.ljust(state_width),
                                   vd.status.name.ljust(status_width))
-        for pd in sorted(vd.pdisks):
-            if not pd.is_dedicated_hs:
-                print_pd_info(pd, 3)
+        if vd.is_parent:
+            for vdc in [vd.children[id] for id in sorted(vd.children.keys())]:
+                print '      Span %s' % vdc.span_num
+                for pd in sorted(vdc.pdisks):
+                    if not pd.is_dedicated_hs:
+                        print_pd_info(pd, 4)
+        else:
+            for pd in sorted(vd.pdisks):
+                if not pd.is_dedicated_hs:
+                    print_pd_info(pd, 3)
         hs_printed = False
         for pd in sorted(vd.pdisks):
             if pd.is_dedicated_hs:
