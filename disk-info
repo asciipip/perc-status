@@ -260,27 +260,30 @@ for vdisk in vdisks.values():
             vdisk.add_pdisk(obj, pdisks)
 
 max_indent = 3
-pd_id_width = max([len(pd.display_id) for pd in pdisks.values()])
-pd_state_width = max([len(pd.state.name) for pd in pdisks.values()])
-pd_status_width = max([len(pd.status.name) for pd in pdisks.values()])
+id_width = max(max([len(pd.display_id) for pd in pdisks.values()]),
+               max([len(vd.layout.name) for vd in vdisks.values()]))
+state_width = max(max([len(pd.state.name) for pd in pdisks.values()]),
+                  max([len(vd.state.name) for vd in vdisks.values()]))
+status_width = max(max([len(pd.status.name) for pd in pdisks.values()]),
+                   max([len(vd.status.name) for vd in vdisks.values()]))
 def print_pd_info(pd, indent):
     extra_info = ''
     if pd.progress != None:
         extra_info += '  %d%%' % pd.progress
         
     print '%s%s  %s  %s%s' % ('  ' * indent,
-                              pd.display_id.ljust(pd_id_width + 2 * (max_indent - indent)),
-                              pd.state.name.ljust(pd_state_width),
-                              pd.status.name.ljust(pd_status_width),
+                              pd.display_id.ljust(id_width + 2 * (max_indent - indent)),
+                              pd.state.name.ljust(state_width),
+                              pd.status.name.ljust(status_width),
                               extra_info)
 
 for c in sorted(controllers.values()):
     print '%s (%s)  %s  %s' % (c.name, c.id, c.state.name, c.status.name)
     for vd in sorted(c.vdisks):
         print '  %s (%s) at %s' % (vd.name, vd.display_id, vd.device_name)
-        print '    %s  %s  %s' % (vd.layout.name.ljust(pd_id_width + 2),
-                                  vd.state.name.ljust(pd_state_width),
-                                  vd.status.name.ljust(pd_status_width))
+        print '    %s  %s  %s' % (vd.layout.name.ljust(id_width + 2),
+                                  vd.state.name.ljust(state_width),
+                                  vd.status.name.ljust(status_width))
         for pd in sorted(vd.pdisks):
             if not pd.is_dedicated_hs:
                 print_pd_info(pd, 3)
