@@ -72,6 +72,7 @@ VDLayout = EnumClass({
 State = EnumClass({
         1:                'Ready',
         4:                'Online',
+        8:                'Offline',
         32:               'Degraded',
         8388608:          'Rebuilding',
         9007199254740992: 'Degraded Redundancy',
@@ -79,6 +80,7 @@ State = EnumClass({
 Status = EnumClass({
         2: 'Ok',
         3: 'Non-Critical',
+        4: 'Critical',
     })
 
 class Controller:
