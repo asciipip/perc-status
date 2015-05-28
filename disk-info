@@ -13,10 +13,15 @@ except ImportError:
     import elementtree.ElementTree as ET
 
 def bin_str(x, count=0):
+    """ Returns a string containing the binary representation of the given
+    integer.  COUNT represents the number of digits that should be in the
+    output.  If omitted, as few digits will be used as possible."""
     if count == 0:
         count = int(math.log(x, 2)) + 1
     return ''.join(map(lambda y:str((x>>y)&1), xrange(count - 1, -1, -1)))
 
+# Use the type information in the XML to turn some of the values into Python
+# typed values.
 def get_field(obj, fieldname):
     f = obj.find(fieldname)
     if f == None:
@@ -30,45 +35,46 @@ def get_field(obj, fieldname):
         return f.text.decode('string_escape')
     return f.text
 
-class VDLayout:
-    NAMES = {
+# There are several things in the XML that are represented essentially as
+# C-style enums; each distinct integer value carries a different meaning.
+# (Rather than being successive integers, they appear to be successive
+# powers of 2, but that's an implementation detail.)  This function lets us
+# create classes for those enums that simply associate more readable names
+# with the integer values.
+def EnumClass(names):
+    class enum:
+        def __init__(self, layout_id):
+            self.id = layout_id
+            if self.id in names:
+                self.name = names[self.id]
+            else:
+                self.name = 'Unknown (%s)' % self.id
+    return enum
+
+# The following enum mappings are based almost entirely on direct experience
+# rather than any sort of documentation from Dell.  As such, there are gaps
+# in the values because we simply haven't seen those values in practice yet.
+VDLayout = EnumClass({
         4:      'RAID-1',
         64:     'RAID-5',
         128:    'RAID-6',
         262144: 'RAID-60',
-    }
-    def __init__(self, layout_id):
-        self.id = layout_id
-        if self.id in self.NAMES:
-            self.name = self.NAMES[self.id]
-        else:
-            self.name = 'Unknown (%s)' % self.id
-
-class State:
-    NAMES = {
-        1: 'Ready',
-        4: 'Online',
-    }
-    def __init__(self, state_id):
-        self.id = state_id
-        if self.id in self.NAMES:
-            self.name = self.NAMES[self.id]
-        else:
-            self.name = 'Unknown (%s)' % self.id
-
-class Status:
-    NAMES = {
+    })
+State = EnumClass({
+        1:                'Ready',
+        4:                'Online',
+        32:               'Degraded',
+        8388608:          'Rebuilding',
+        9007199254740992: 'Degraded Redundancy',
+    })
+Status = EnumClass({
         2: 'Ok',
-    }
-    def __init__(self, status_id):
-        self.id = status_id
-        if self.id in self.NAMES:
-            self.name = self.NAMES[self.id]
-        else:
-            self.name = 'Unknown (%s)' % self.id
+        3: 'Non-Critical',
+    })
 
 class Controller:
     def __init__(self, storage_object, controllers):
+        assert(769 == get_field(storage_object, 'ObjType'))
         self.state  = State(get_field(storage_object, 'ObjState'))
         self.status = Status(get_field(storage_object, 'ObjStatus'))
         self.attributes_mask = get_field(storage_object, 'AttributesMask')
@@ -89,6 +95,7 @@ class Controller:
 
 class VDisk:
     def __init__(self, storage_object, controllers, vdisks):
+        assert(773 == get_field(storage_object, 'ObjType'))
         self.state  = State(get_field(storage_object, 'ObjState'))
         self.status = Status(get_field(storage_object, 'ObjStatus'))
         self.attributes_mask = get_field(storage_object, 'AttributesMask')
@@ -150,6 +157,7 @@ class VDisk:
 
 class PDisk:
     def __init__(self, storage_object, controllers, pdisks):
+        assert(772 == get_field(storage_object, 'ObjType'))
         self.state  = State(get_field(storage_object, 'ObjState'))
         self.status = Status(get_field(storage_object, 'ObjStatus'))
         self.controller_num  = get_field(storage_object, 'ControllerNum' )
@@ -166,6 +174,7 @@ class PDisk:
         self.bus_protocol    = get_field(storage_object, 'BusProtocol'   )
         self.enclosure_index = get_field(storage_object, 'EnclosureIndex')
         self.num_of_associated_vd = get_field(storage_object, 'NumOfAssociatedVD')
+        self.progress        = get_field(storage_object, 'Progress'      )
 
         self.controller = controllers[self.controller_num]
         self.controller.pdisks.append(self)
@@ -255,12 +264,18 @@ pd_id_width = max([len(pd.display_id) for pd in pdisks.values()])
 pd_state_width = max([len(pd.state.name) for pd in pdisks.values()])
 pd_status_width = max([len(pd.status.name) for pd in pdisks.values()])
 def print_pd_info(pd, indent):
-    print '%s%s  %s  %s' % ('  ' * indent,
-                            pd.display_id.ljust(pd_id_width + 2 * (max_indent - indent)),
-                            pd.state.name.ljust(pd_state_width),
-                            pd.status.name.ljust(pd_status_width))
+    extra_info = ''
+    if pd.progress != None:
+        extra_info += '  %d%%' % pd.progress
+        
+    print '%s%s  %s  %s%s' % ('  ' * indent,
+                              pd.display_id.ljust(pd_id_width + 2 * (max_indent - indent)),
+                              pd.state.name.ljust(pd_state_width),
+                              pd.status.name.ljust(pd_status_width),
+                              extra_info)
+
 for c in sorted(controllers.values()):
-    print '%s (%s)' % (c.name, c.id)
+    print '%s (%s)  %s  %s' % (c.name, c.id, c.state.name, c.status.name)
     for vd in sorted(c.vdisks):
         print '  %s (%s) at %s' % (vd.name, vd.display_id, vd.device_name)
         print '    %s  %s  %s' % (vd.layout.name.ljust(pd_id_width + 2),
@@ -313,6 +328,7 @@ for c in sorted(controllers.values()):
 #
 #print
 #
+## For showing attribute masks
 #id_len = max([len(d.id) for d in disk_list])
 #attr_len = max([int(math.log(d.attributes_mask, 2)) + 1 for d in disk_list])
 #print 'Attributes'
