@@ -299,17 +299,21 @@ status_width = max(max([len(pd.status.name) for pd in pdisks.values()]),
                    max([len(vd.status.name) for vd in vdisks.values() if not vd.is_child]))
 size_length = max(max([len(human_size(pd.length)) for pd in pdisks.values()]),
                   max([len(human_size(vd.length)) for vd in vdisks.values() if not vd.is_child]))
-def print_pd_info(pd, indent):
-    extra_info = ''
-    if pd.progress != None:
-        extra_info += '  %d%%' % pd.progress
-        
-    print '%s%s  %s  %s  %s%s' % ('  ' * indent,
-                              pd.display_id.ljust(id_width + 2 * (max_indent - indent)),
-                              pd.state.name.ljust(state_width),
-                              pd.status.name.ljust(status_width),
-                              human_size(pd.length).rjust(size_length),
-                              extra_info)
+def print_pds(indent, pds, prefix=None):
+    prefix_printed = False
+    for pd in sorted(pds):
+        if prefix and not prefix_printed:
+            print '%s%s' % ('  ' * (indent - 1), prefix)
+            prefix_printed = True
+        extra_info = ''
+        if pd.progress != None:
+            extra_info += '  %d%%' % pd.progress
+        print '%s%s  %s  %s  %s%s' % ('  ' * indent,
+                                      pd.display_id.ljust(id_width + 2 * (max_indent - indent)),
+                                      pd.state.name.ljust(state_width),
+                                      pd.status.name.ljust(status_width),
+                                      human_size(pd.length).rjust(size_length),
+                                      extra_info)
 
 for c in sorted(controllers.values()):
     print '%s (%s)  %s  %s' % (c.name, c.id, c.state.name, c.status.name)
@@ -323,35 +327,14 @@ for c in sorted(controllers.values()):
                                       human_size(vd.length).rjust(size_length))
         if vd.is_parent:
             for vdc in [vd.children[id] for id in sorted(vd.children.keys())]:
-                print '      Span %s' % vdc.span_num
-                for pd in sorted(vdc.pdisks):
-                    if not pd.is_dedicated_hs:
-                        print_pd_info(pd, 4)
+                print_pds(4, [pd for pd in vdc.pdisks if not pd.is_dedicated_hs],
+                          'Span %s' % vdc.span_num)
         else:
-            for pd in sorted(vd.pdisks):
-                if not pd.is_dedicated_hs:
-                    print_pd_info(pd, 3)
-        hs_printed = False
-        for pd in sorted(vd.pdisks):
-            if pd.is_dedicated_hs:
-                if not hs_printed:
-                    print '    Spares'
-                    hs_printed = True
-                print_pd_info(pd, 3)
-    hs_printed = False
-    for pd in sorted(c.pdisks):
-        if pd.is_global_hs:
-            if not hs_printed:
-                print '  Global Spares'
-                hs_printed = True
-            print_pd_info(pd, 2)
-    idle_printed = False
-    for pd in sorted(c.pdisks):
-        if pd.vdisk == None and not pd.is_global_hs:
-            if not idle_printed:
-                print '  Unused'
-                idle_printed = True
-            print_pd_info(pd, 2)
+            print_pds(3, [pd for pd in vd.pdisks if not pd.is_dedicated_hs])
+        print_pds(3, [pd for pd in vd.pdisks if pd.is_dedicated_hs], 'Spares')
+    print_pds(2, [pd for pd in c.pdisks if pd.is_global_hs], 'Global Spares')
+    print_pds(2, [pd for pd in c.pdisks if pd.vdisk == None and not pd.is_global_hs],
+              'Unused')
     print
 
 ### Debugging stuff
