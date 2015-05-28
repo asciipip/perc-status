@@ -20,6 +20,15 @@ def bin_str(x, count=0):
         count = int(math.log(x, 2)) + 1
     return ''.join(map(lambda y:str((x>>y)&1), xrange(count - 1, -1, -1)))
 
+def human_size(bytes):
+    suffixes = ['B  ', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB']
+    size = float(bytes)
+    for s in suffixes:
+        if size < 1024:
+            return '%.2f %s' % (size, s)
+        size /= 1024
+    return '%.2f %s' % (size * 1024, suffixes[-1])
+    
 # Use the type information in the XML to turn some of the values into Python
 # typed values.
 def get_field(obj, fieldname):
@@ -110,6 +119,7 @@ class VDisk:
         self.logical_drive_num = get_field(storage_object, 'LogicalDriveNum')
         self.parent_vd_id    = get_field(storage_object, 'ParentVDID'    )
         self.span_num        = get_field(storage_object, 'SpanNum'       )
+        self.length          = get_field(storage_object, 'Length'        )
 
         self.layout = VDLayout(get_field(storage_object, 'Layout'))
 
@@ -192,6 +202,7 @@ class PDisk:
         self.enclosure_index = get_field(storage_object, 'EnclosureIndex')
         self.num_of_associated_vd = get_field(storage_object, 'NumOfAssociatedVD')
         self.progress        = get_field(storage_object, 'Progress'      )
+        self.length          = get_field(storage_object, 'Length'        )
 
         self.controller = controllers[self.controller_num]
         self.controller.pdisks.append(self)
@@ -286,15 +297,18 @@ state_width = max(max([len(pd.state.name) for pd in pdisks.values()]),
                   max([len(vd.state.name) for vd in vdisks.values() if not vd.is_child]))
 status_width = max(max([len(pd.status.name) for pd in pdisks.values()]),
                    max([len(vd.status.name) for vd in vdisks.values() if not vd.is_child]))
+size_length = max(max([len(human_size(pd.length)) for pd in pdisks.values()]),
+                  max([len(human_size(vd.length)) for vd in vdisks.values() if not vd.is_child]))
 def print_pd_info(pd, indent):
     extra_info = ''
     if pd.progress != None:
         extra_info += '  %d%%' % pd.progress
         
-    print '%s%s  %s  %s%s' % ('  ' * indent,
+    print '%s%s  %s  %s  %s%s' % ('  ' * indent,
                               pd.display_id.ljust(id_width + 2 * (max_indent - indent)),
                               pd.state.name.ljust(state_width),
                               pd.status.name.ljust(status_width),
+                              human_size(pd.length).rjust(size_length),
                               extra_info)
 
 for c in sorted(controllers.values()):
@@ -303,9 +317,10 @@ for c in sorted(controllers.values()):
         if vd.parent:
             continue
         print '  %s (%s) at %s' % (vd.name, vd.display_id, vd.device_name)
-        print '    %s  %s  %s' % (vd.layout.name.ljust(id_width + 2 * (max_indent - 2)),
-                                  vd.state.name.ljust(state_width),
-                                  vd.status.name.ljust(status_width))
+        print '    %s  %s  %s  %s' % (vd.layout.name.ljust(id_width + 2 * (max_indent - 2)),
+                                      vd.state.name.ljust(state_width),
+                                      vd.status.name.ljust(status_width),
+                                      human_size(vd.length).rjust(size_length))
         if vd.is_parent:
             for vdc in [vd.children[id] for id in sorted(vd.children.keys())]:
                 print '      Span %s' % vdc.span_num
