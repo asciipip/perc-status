@@ -1,0 +1,323 @@
+#!/usr/bin/env python
+
+import math
+import re
+import subprocess
+
+ATTR_GLOBAL_HS    = 1<<7
+ATTR_DEDICATED_HS = 1<<8
+
+try:
+    import xml.etree.ElementTree as ET
+except ImportError:
+    import elementtree.ElementTree as ET
+
+def bin_str(x, count=0):
+    if count == 0:
+        count = int(math.log(x, 2)) + 1
+    return ''.join(map(lambda y:str((x>>y)&1), xrange(count - 1, -1, -1)))
+
+def get_field(obj, fieldname):
+    f = obj.find(fieldname)
+    if f == None:
+        return None
+    if f.attrib['type'] in ['u32', 'u64']:
+        if re.search('Mask$', fieldname):
+            return int(f.text, 2)
+        else:
+            return int(f.text)
+    if f.attrib['type'] == 'astring':
+        return f.text.decode('string_escape')
+    return f.text
+
+class VDLayout:
+    NAMES = {
+        4:      'RAID-1',
+        64:     'RAID-5',
+        128:    'RAID-6',
+        262144: 'RAID-60',
+    }
+    def __init__(self, layout_id):
+        self.id = layout_id
+        if self.id in self.NAMES:
+            self.name = self.NAMES[self.id]
+        else:
+            self.name = 'Unknown (%s)' % self.id
+
+class State:
+    NAMES = {
+        1: 'Ready',
+        4: 'Online',
+    }
+    def __init__(self, state_id):
+        self.id = state_id
+        if self.id in self.NAMES:
+            self.name = self.NAMES[self.id]
+        else:
+            self.name = 'Unknown (%s)' % self.id
+
+class Status:
+    NAMES = {
+        2: 'Ok',
+    }
+    def __init__(self, status_id):
+        self.id = status_id
+        if self.id in self.NAMES:
+            self.name = self.NAMES[self.id]
+        else:
+            self.name = 'Unknown (%s)' % self.id
+
+class Controller:
+    def __init__(self, storage_object, controllers):
+        self.state  = State(get_field(storage_object, 'ObjState'))
+        self.status = Status(get_field(storage_object, 'ObjStatus'))
+        self.attributes_mask = get_field(storage_object, 'AttributesMask')
+        self.name            = get_field(storage_object, 'Name'          )
+        self.controller_num  = get_field(storage_object, 'ControllerNum' )
+
+        self.vdisks = []
+        self.pdisks = []
+
+        controllers[self.id] = self
+
+    def __cmp__(self, other):
+        return cmp(self.controller_num, other.controller_num)
+
+    @property
+    def id(self):
+        return self.controller_num
+
+class VDisk:
+    def __init__(self, storage_object, controllers, vdisks):
+        self.state  = State(get_field(storage_object, 'ObjState'))
+        self.status = Status(get_field(storage_object, 'ObjStatus'))
+        self.attributes_mask = get_field(storage_object, 'AttributesMask')
+        self.name            = get_field(storage_object, 'Name'          )
+        self.controller_num  = get_field(storage_object, 'ControllerNum' )
+        self.device_name     = get_field(storage_object, 'DeviceName'    )
+
+        self.array_num       = get_field(storage_object, 'ArrayNum'      )
+        self.logical_drive_num = get_field(storage_object, 'LogicalDriveNum')
+        self.parent_vd_id    = get_field(storage_object, 'ParentVDID'    )
+
+        self.layout = VDLayout(get_field(storage_object, 'Layout'))
+
+        if self.controller_num != None:
+            self.controller = controllers[self.controller_num]
+            self.controller.vdisks.append(self)
+
+        self.children = []
+        for vd in vdisks.values():
+            if self.parent_vd_id != None and vd.logical_drive_num == self.parent_vd_id:
+                self.parent_vd = vd
+                vd.children.append(self)
+                self.controller = vd.controller
+                self.controller.vdisks.append(self)
+            if vd.parent_vd_id != None and self.logical_drive_num == vd.parent_vd_id:
+                vd.parent_vd = self
+                self.children.append(vd)
+                vd.controller = self.controller
+                vd.controller.vdisks.append(vd)
+        self.pdisks = []
+
+        vdisks[self.id] = self
+
+    def __cmp__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        r = cmp(self.controller_num, other.controller_num)
+        if r != 0:
+            return r
+        return cmp(self.logical_drive_num, other.logical_drive_num)
+
+    @property
+    def id(self):
+        return '%s;%s' % (self.controller_num, self.logical_drive_num)
+        
+    @property
+    def display_id(self):
+        return '%s' % (self.logical_drive_num)
+        
+    def add_pdisk(self, storage_object, pdisks):
+        key = '%s;%s:%s:%s' % (get_field(storage_object, 'ControllerNum'),
+                               get_field(storage_object, 'Channel'),
+                               get_field(storage_object, 'EnclosureID'),
+                               get_field(storage_object, 'TargetID'))
+        pdisk = pdisks[key]
+        self.pdisks.append(pdisk)
+        pdisk.vdisk = self
+    
+
+class PDisk:
+    def __init__(self, storage_object, controllers, pdisks):
+        self.state  = State(get_field(storage_object, 'ObjState'))
+        self.status = Status(get_field(storage_object, 'ObjStatus'))
+        self.controller_num  = get_field(storage_object, 'ControllerNum' )
+        self.channel         = get_field(storage_object, 'Channel'       )
+        self.enclosure_id    = get_field(storage_object, 'EnclosureID'   )
+        self.target_id       = get_field(storage_object, 'TargetID'      )
+        self.array_num       = get_field(storage_object, 'ArrayNum'      )
+        self.device_id       = get_field(storage_object, 'DeviceID'      )
+        self.nexus           = get_field(storage_object, 'Nexus'         )
+        self.attributes_mask = get_field(storage_object, 'AttributesMask')
+        self.product_id      = get_field(storage_object, 'ProductID'     )
+        self.device_serial_number = get_field(storage_object, 'DeviceSerialNumber')
+        self.sas_address     = get_field(storage_object, 'SASAddress'    )
+        self.bus_protocol    = get_field(storage_object, 'BusProtocol'   )
+        self.enclosure_index = get_field(storage_object, 'EnclosureIndex')
+        self.num_of_associated_vd = get_field(storage_object, 'NumOfAssociatedVD')
+
+        self.controller = controllers[self.controller_num]
+        self.controller.pdisks.append(self)
+
+        self.vdisk = None
+
+        pdisks[self.id] = self
+
+    def __repr__(self):
+        return '<Disk(%s)>' % self.id
+
+    def __cmp__(self, other):
+        r = cmp(self.controller_num, other.controller_num)
+        if r != 0:
+            return r
+        r = cmp(self.channel, other.channel)
+        if r != 0:
+            return r
+        r = cmp(self.enclosure_id, other.enclosure_id)
+        if r != 0:
+            return r
+        return cmp(self.target_id, other.target_id)
+
+    @property
+    def id(self):
+        return '%s;%s:%s:%s' % (self.controller_num, self.channel, self.enclosure_id, self.target_id)
+
+    @property
+    def display_id(self):
+        return '%s:%s:%s' % (self.channel, self.enclosure_id, self.target_id)
+
+    @property
+    def is_global_hs(self):
+        return self.attributes_mask & ATTR_GLOBAL_HS > 0
+
+    @property
+    def is_dedicated_hs(self):
+        return self.attributes_mask & ATTR_DEDICATED_HS > 0
+
+# See how many controllers we have.
+controllers = {}
+omr = subprocess.Popen(['/opt/dell/srvadmin/bin/omreport', 'storage', 'controller', '-fmt', 'xml'],
+                       stdout=subprocess.PIPE)
+stdout, ignored = omr.communicate()
+root = ET.fromstring(stdout)
+for obj in root.find('Controllers').findall('DCStorageObject'):
+    Controller(obj, controllers)
+
+# Get all of the virtual disks accross all controllers
+vdisks = {}
+for controller in controllers.values():
+    omr = subprocess.Popen(['/opt/dell/srvadmin/bin/omreport', 'storage', 'vdisk', 'controller=%d' % controller.controller_num, '-fmt', 'xml'],
+                           stdout=subprocess.PIPE)
+    stdout, ignored = omr.communicate()
+    root = ET.fromstring(stdout)
+    et_virtual_disks = root.find('VirtualDisks')
+    if et_virtual_disks:
+        for obj in et_virtual_disks.findall('DCStorageObject'):
+            VDisk(obj, controllers, vdisks)
+
+# Get all of the disks across all of the controllers.
+pdisks = {}
+for controller in controllers.values():
+    omr = subprocess.Popen(['/opt/dell/srvadmin/bin/omreport', 'storage', 'controller', 'controller=%d' % controller.controller_num, '-fmt', 'xml'],
+                           stdout=subprocess.PIPE)
+    stdout, ignored = omr.communicate()
+    root = ET.fromstring(stdout)
+    et_array_disks = root.find('ArrayDisks')
+    if et_array_disks:
+        for obj in et_array_disks.findall('DCStorageObject'):
+            PDisk(obj, controllers, pdisks)
+
+disk_list = sorted(pdisks.values())
+
+# Assign pdisks to vdisks.
+for vdisk in vdisks.values():
+    if vdisk.controller_num != None:
+        omr = subprocess.Popen(['/opt/dell/srvadmin/bin/omreport', 'storage', 'pdisk', 'controller=%d' % vdisk.controller_num, 'vdisk=%d' % vdisk.logical_drive_num, '-fmt', 'xml'],
+                               stdout=subprocess.PIPE)
+        stdout, ignored = omr.communicate()
+        root = ET.fromstring(stdout)
+        for obj in root.find('ArrayDisks').findall('DCStorageObject'):
+            vdisk.add_pdisk(obj, pdisks)
+
+max_indent = 3
+pd_id_width = max([len(pd.display_id) for pd in pdisks.values()])
+pd_state_width = max([len(pd.state.name) for pd in pdisks.values()])
+pd_status_width = max([len(pd.status.name) for pd in pdisks.values()])
+def print_pd_info(pd, indent):
+    print '%s%s  %s  %s' % ('  ' * indent,
+                            pd.display_id.ljust(pd_id_width + 2 * (max_indent - indent)),
+                            pd.state.name.ljust(pd_state_width),
+                            pd.status.name.ljust(pd_status_width))
+for c in sorted(controllers.values()):
+    print '%s (%s)' % (c.name, c.id)
+    for vd in sorted(c.vdisks):
+        print '  %s (%s) at %s' % (vd.name, vd.display_id, vd.device_name)
+        print '    %s  %s  %s' % (vd.layout.name.ljust(pd_id_width + 2),
+                                  vd.state.name.ljust(pd_state_width),
+                                  vd.status.name.ljust(pd_status_width))
+        for pd in sorted(vd.pdisks):
+            if not pd.is_dedicated_hs:
+                print_pd_info(pd, 3)
+        hs_printed = False
+        for pd in sorted(vd.pdisks):
+            if pd.is_dedicated_hs:
+                if not hs_printed:
+                    print '    Spares'
+                    hs_printed = True
+                print_pd_info(pd, 3)
+    hs_printed = False
+    for pd in sorted(c.pdisks):
+        if pd.is_global_hs:
+            if not hs_printed:
+                print '  Global Spares'
+                hs_printed = True
+            print_pd_info(pd, 2)
+    idle_printed = False
+    for pd in sorted(c.pdisks):
+        if pd.vdisk == None and not pd.is_global_hs:
+            if not idle_printed:
+                print '  Unused'
+                idle_printed = True
+            print_pd_info(pd, 2)
+    print
+
+### Debugging stuff
+#labels = ['Controller', 'Channel', 'Enclosure ID', 'Target ID', 'State', 'Array Num', 'Device ID', 'Status', 'Bus Protocol', 'Enclosure Index', 'Assoc. VD']
+#label_len = max([len(l) for l in labels])
+#
+#def get_column(disk):
+#    return [str(v) for v in [d.controller_num, d.channel, d.enclosure_id, d.target_id, d.obj_state, d.array_num, d.device_id, d.obj_status, d.bus_protocol, d.enclosure_index, d.num_of_associated_vd]]
+#
+#columns = []
+#lens = []
+#for d in disk_list:
+#    columns.append(get_column(d))
+#    lens.append(max([len(f) for f in columns[-1]]))
+#
+#for i in xrange(0, len(labels)):
+#    print labels[i].ljust(label_len),
+#    for j in xrange(0, len(columns)):
+#        print columns[j][i].rjust(lens[j]),
+#    print
+#
+#print
+#
+#id_len = max([len(d.id) for d in disk_list])
+#attr_len = max([int(math.log(d.attributes_mask, 2)) + 1 for d in disk_list])
+#print 'Attributes'
+#for d in disk_list:
+#    print d.id.ljust(id_len), bin_str(d.attributes_mask, attr_len)
+#
+#print
+
