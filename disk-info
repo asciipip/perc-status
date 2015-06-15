@@ -76,6 +76,7 @@ State = EnumClass({
         32:               'Degraded',
         2097152:          'Replacing',
         8388608:          'Rebuilding',
+        274877906944:     'Foreign',
         9007199254740992: 'Degraded Redundancy',
     })
 Status = EnumClass({
