@@ -14,6 +14,9 @@ Simply run the `perc-status` script.  If `omreport` isn't in your
 path, pass its location to the script with the `-r` command line
 parameter.
 
+You can limit the program's output to a single controller with the
+`-c` command line parameter.
+
 ## Examples
 
 A few examples of the script's output:

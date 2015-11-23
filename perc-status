@@ -3,6 +3,7 @@
 import math
 import optparse
 import re
+import sys
 import subprocess
 
 ATTR_GLOBAL_HS    = 1<<7
@@ -16,6 +17,8 @@ except ImportError:
 option_parser = optparse.OptionParser()
 option_parser.add_option('-r', '--omreport', default='omreport',
                          help='Location of the omreport program, if not in $PATH.')
+option_parser.add_option('-c', '--controller', type='int',
+                         help='Specific controller number to query.  Default is all controllers.')
 (options, args) = option_parser.parse_args()
 
 def bin_str(x, count=0):
@@ -261,7 +264,15 @@ omr = subprocess.Popen([options.omreport, 'storage', 'controller', '-fmt', 'xml'
 stdout, ignored = omr.communicate()
 root = ET.fromstring(stdout)
 for obj in root.find('Controllers').findall('DCStorageObject'):
-    Controller(obj, controllers)
+    if options.controller:
+        if options.controller == get_field(obj, 'ControllerNum'):
+            Controller(obj, controllers)
+    else:
+        Controller(obj, controllers)
+
+if len(controllers) == 0:
+    print >>sys.stdout, 'No controllers found!'
+    sys.exit(1)
 
 # Get all of the virtual disks accross all controllers
 vdisks = {}
