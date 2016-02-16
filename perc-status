@@ -282,7 +282,7 @@ for controller in controllers.values():
     stdout, ignored = omr.communicate()
     root = ET.fromstring(stdout)
     et_virtual_disks = root.find('VirtualDisks')
-    if et_virtual_disks:
+    if et_virtual_disks is not None:
         for obj in et_virtual_disks.findall('DCStorageObject'):
             VDisk(obj, controller.controller_num, controllers, vdisks)
 
@@ -294,7 +294,7 @@ for controller in controllers.values():
     stdout, ignored = omr.communicate()
     root = ET.fromstring(stdout)
     et_array_disks = root.find('ArrayDisks')
-    if et_array_disks:
+    if et_array_disks is not None:
         for obj in et_array_disks.findall('DCStorageObject'):
             PDisk(obj, controllers, pdisks)
 
