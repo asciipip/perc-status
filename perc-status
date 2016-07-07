@@ -265,7 +265,7 @@ omr = subprocess.Popen([options.omreport, 'storage', 'controller', '-fmt', 'xml'
 stdout, ignored = omr.communicate()
 root = ET.fromstring(stdout)
 for obj in root.find('Controllers').findall('DCStorageObject'):
-    if options.controller:
+    if options.controller is not None:
         if options.controller == get_field(obj, 'ControllerNum'):
             Controller(obj, controllers)
     else:
