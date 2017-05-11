@@ -24,6 +24,8 @@ option_parser.add_option('-c', '--controller', type='int',
                          help='Specific controller number to query.  Default is all controllers.')
 option_parser.add_option('-b', '--show-bus-protocol', action='store_true',
                          help='Show what bus protocol (SAS, SATA, IDE, etc.) each drive uses.')
+option_parser.add_option('-m', '--show-disk-model', action='store_true',
+                         help='Show the modeul number for each physical disk.')
 option_parser.add_option(     '--debug-attribute-masks', action='store_true',
                          help='Instead of the usual output, dump the attribute masks for each physical disk.')
 (options, args) = option_parser.parse_args()
@@ -226,10 +228,11 @@ class PDisk:
         self.device_id       = get_field(storage_object, 'DeviceID'      )
         self.nexus           = get_field(storage_object, 'Nexus'         )
         self.attributes_mask = get_field(storage_object, 'AttributesMask')
+        self.vendor          = get_field(storage_object, 'Vendor'        )
         self.product_id      = get_field(storage_object, 'ProductID'     )
         self.device_serial_number = get_field(storage_object, 'DeviceSerialNumber')
         self.sas_address     = get_field(storage_object, 'SASAddress'    )
-        self.bus_protocol    = BusProtocol(get_field(storage_object, 'BusProtocol'   ))
+        self.bus_protocol    = BusProtocol(get_field(storage_object, 'BusProtocol'))
         self.enclosure_index = get_field(storage_object, 'EnclosureIndex')
         self.num_of_associated_vd = get_field(storage_object, 'NumOfAssociatedVD')
         self.progress        = get_field(storage_object, 'Progress'      )
@@ -351,6 +354,8 @@ def print_pds(indent, pds, prefix=None):
         extra_info = ''
         if options.show_bus_protocol:
             extra_info += '  %s' % pd.bus_protocol.name
+        if options.show_disk_model:
+            extra_info += '  %s' % pd.product_id
         if pd.progress != None:
             extra_info += '  %d%%' % pd.progress
         if pd.is_failure_predicted:
