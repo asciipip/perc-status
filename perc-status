@@ -24,6 +24,8 @@ option_parser.add_option('-c', '--controller', type='int',
                          help='Specific controller number to query.  Default is all controllers.')
 option_parser.add_option('-b', '--show-bus-protocol', action='store_true',
                          help='Show what bus protocol (SAS, SATA, IDE, etc.) each drive uses.')
+option_parser.add_option(     '--debug-attribute-masks', action='store_true',
+                         help='Instead of the usual output, dump the attribute masks for each physical disk.')
 (options, args) = option_parser.parse_args()
 
 def bin_str(x, count=0):
@@ -383,7 +385,16 @@ def print_controllers(controllers):
                   'Unused')
         print
 
-print_controllers(controllers)
+def print_attribute_masks(disk_list):
+    id_len = max([len(d.id) for d in disk_list])
+    attr_len = max([int(math.log(d.attributes_mask, 2)) + 1 for d in disk_list])
+    for d in disk_list:
+        print d.id.ljust(id_len), bin_str(d.attributes_mask, attr_len)
+
+if options.debug_attribute_masks:
+    print_attribute_masks(disk_list)
+else:
+    print_controllers(controllers)
 
 ### Debugging stuff
 #labels = ['Controller', 'Channel', 'Enclosure ID', 'Target ID', 'State', 'Array Num', 'Device ID', 'Status', 'Bus Protocol', 'Enclosure Index', 'Assoc. VD']
@@ -403,14 +414,5 @@ print_controllers(controllers)
 #    for j in xrange(0, len(columns)):
 #        print columns[j][i].rjust(lens[j]),
 #    print
-#
-#print
-#
-## For showing attribute masks
-#id_len = max([len(d.id) for d in disk_list])
-#attr_len = max([int(math.log(d.attributes_mask, 2)) + 1 for d in disk_list])
-#print 'Attributes'
-#for d in disk_list:
-#    print d.id.ljust(id_len), bin_str(d.attributes_mask, attr_len)
 #
 #print
