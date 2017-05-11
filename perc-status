@@ -6,8 +6,10 @@ import re
 import sys
 import subprocess
 
+ATTR_LOGICAL_CONNECTOR = 1<<6
 ATTR_GLOBAL_HS         = 1<<7
 ATTR_DEDICATED_HS      = 1<<8
+ATTR_NON_RAID          = 1<<9
 ATTR_FAILURE_PREDICTED = 1<<11
 
 try:
@@ -20,6 +22,8 @@ option_parser.add_option('-r', '--omreport', default='omreport',
                          help='Location of the omreport program, if not in $PATH.')
 option_parser.add_option('-c', '--controller', type='int',
                          help='Specific controller number to query.  Default is all controllers.')
+option_parser.add_option('-b', '--show-bus-protocol', action='store_true',
+                         help='Show what bus protocol (SAS, SATA, IDE, etc.) each drive uses.')
 (options, args) = option_parser.parse_args()
 
 def bin_str(x, count=0):
@@ -97,6 +101,13 @@ Status = EnumClass({
         2: 'Ok',
         3: 'Non-Critical',
         4: 'Critical',
+    })
+BusProtocol = EnumClass({
+        1: 'SCSI',
+        2: 'IDE',
+        7: 'SATA',
+        8: 'SAS',
+        9: 'PCIe',
     })
 
 class Controller:
@@ -216,7 +227,7 @@ class PDisk:
         self.product_id      = get_field(storage_object, 'ProductID'     )
         self.device_serial_number = get_field(storage_object, 'DeviceSerialNumber')
         self.sas_address     = get_field(storage_object, 'SASAddress'    )
-        self.bus_protocol    = get_field(storage_object, 'BusProtocol'   )
+        self.bus_protocol    = BusProtocol(get_field(storage_object, 'BusProtocol'   ))
         self.enclosure_index = get_field(storage_object, 'EnclosureIndex')
         self.num_of_associated_vd = get_field(storage_object, 'NumOfAssociatedVD')
         self.progress        = get_field(storage_object, 'Progress'      )
@@ -336,6 +347,8 @@ def print_pds(indent, pds, prefix=None):
             print '%s%s' % ('  ' * (indent - 1), prefix)
             prefix_printed = True
         extra_info = ''
+        if options.show_bus_protocol:
+            extra_info += '  %s' % pd.bus_protocol.name
         if pd.progress != None:
             extra_info += '  %d%%' % pd.progress
         if pd.is_failure_predicted:
