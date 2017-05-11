@@ -339,8 +339,8 @@ def print_pds(indent, pds, prefix=None):
         if pd.progress != None:
             extra_info += '  %d%%' % pd.progress
         if pd.is_failure_predicted:
-            extra_info += ' Failure Predicted'
-        print '%s%s  %s  %s  %s %s' % ('  ' * indent,
+            extra_info += '  Failure Predicted'
+        print '%s%s  %s  %s  %s%s' % ('  ' * indent,
                                       pd.display_id.ljust(id_width + 2 * (max_indent - indent)),
                                       pd.state.name.ljust(state_width),
                                       pd.status.name.ljust(status_width),
