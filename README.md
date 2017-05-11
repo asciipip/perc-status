@@ -17,9 +17,9 @@ parameter.
 You can limit the program's output to a single controller with the
 `-c` command line parameter.
 
-The `-b` command line parameter whill show the bus protocol (SAS,
-SATA, IDE, etc.) for each physical disk.  Similarly, the `-m`
-parameter will show each disk's model number.
+The `-b` command line parameter will show the bus protocol (SAS, SATA,
+IDE, etc.) for each physical disk.  Similarly, the `-m` parameter will
+show each disk's model number.
 
 ## Examples
 
