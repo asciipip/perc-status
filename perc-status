@@ -395,24 +395,3 @@ if options.debug_attribute_masks:
     print_attribute_masks(disk_list)
 else:
     print_controllers(controllers)
-
-### Debugging stuff
-#labels = ['Controller', 'Channel', 'Enclosure ID', 'Target ID', 'State', 'Array Num', 'Device ID', 'Status', 'Bus Protocol', 'Enclosure Index', 'Assoc. VD']
-#label_len = max([len(l) for l in labels])
-#
-#def get_column(disk):
-#    return [str(v) for v in [d.controller_num, d.channel, d.enclosure_id, d.target_id, d.obj_state, d.array_num, d.device_id, d.obj_status, d.bus_protocol, d.enclosure_index, d.num_of_associated_vd]]
-#
-#columns = []
-#lens = []
-#for d in disk_list:
-#    columns.append(get_column(d))
-#    lens.append(max([len(f) for f in columns[-1]]))
-#
-#for i in xrange(0, len(labels)):
-#    print labels[i].ljust(label_len),
-#    for j in xrange(0, len(columns)):
-#        print columns[j][i].rjust(lens[j]),
-#    print
-#
-#print
