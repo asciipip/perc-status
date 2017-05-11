@@ -6,8 +6,9 @@ import re
 import sys
 import subprocess
 
-ATTR_GLOBAL_HS    = 1<<7
-ATTR_DEDICATED_HS = 1<<8
+ATTR_GLOBAL_HS         = 1<<7
+ATTR_DEDICATED_HS      = 1<<8
+ATTR_FAILURE_PREDICTED = 1<<11
 
 try:
     import xml.etree.ElementTree as ET
@@ -259,6 +260,10 @@ class PDisk:
     def is_dedicated_hs(self):
         return self.attributes_mask & ATTR_DEDICATED_HS > 0
 
+    @property
+    def is_failure_predicted(self):
+        return self.attributes_mask & ATTR_FAILURE_PREDICTED > 0
+
 # See how many controllers we have.
 controllers = {}
 omr = subprocess.Popen([options.omreport, 'storage', 'controller', '-fmt', 'xml'],
@@ -333,7 +338,9 @@ def print_pds(indent, pds, prefix=None):
         extra_info = ''
         if pd.progress != None:
             extra_info += '  %d%%' % pd.progress
-        print '%s%s  %s  %s  %s%s' % ('  ' * indent,
+        if pd.is_failure_predicted:
+            extra_info += ' Failure Predicted'
+        print '%s%s  %s  %s  %s %s' % ('  ' * indent,
                                       pd.display_id.ljust(id_width + 2 * (max_indent - indent)),
                                       pd.state.name.ljust(state_width),
                                       pd.status.name.ljust(status_width),
@@ -391,4 +398,3 @@ for c in sorted(controllers.values()):
 #    print d.id.ljust(id_len), bin_str(d.attributes_mask, attr_len)
 #
 #print
-
