@@ -97,6 +97,7 @@ State = EnumClass({
         4096:             'Non-RAID',
         2097152:          'Replacing',
         8388608:          'Rebuilding',
+        34359738368:      'Background Initialization',
         274877906944:     'Foreign',
         549755813888:     'Clear',
         9007199254740992: 'Degraded Redundancy',
