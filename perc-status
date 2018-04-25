@@ -154,6 +154,7 @@ class VDisk:
         self.parent_vd_id    = get_field(storage_object, 'ParentVDID'    )
         self.span_num        = get_field(storage_object, 'SpanNum'       )
         self.length          = get_field(storage_object, 'Length'        )
+        self.progress        = get_field(storage_object, 'Progress'      )
 
         self.layout = VDLayout(get_field(storage_object, 'Layout'))
 
@@ -372,13 +373,17 @@ def print_controllers(controllers):
     for c in sorted(controllers.values()):
         print '%s (%s)  %s  %s' % (c.name, c.id, c.state.name, c.status.name)
         for vd in sorted(c.vdisks):
+            extra_info = ''
+            if vd.progress != None:
+                extra_info += '  %d%%' % vd.progress
             if vd.parent:
                 continue
             print '  %s (%s) at %s' % (vd.name, vd.display_id, vd.device_name)
-            print '    %s  %s  %s  %s' % (vd.layout.name.ljust(id_width + 2 * (max_indent - 2)),
-                                          vd.state.name.ljust(state_width),
-                                          vd.status.name.ljust(status_width),
-                                          human_size(vd.length).rjust(size_length))
+            print '    %s  %s  %s  %s%s' % (vd.layout.name.ljust(id_width + 2 * (max_indent - 2)),
+                                            vd.state.name.ljust(state_width),
+                                            vd.status.name.ljust(status_width),
+                                            human_size(vd.length).rjust(size_length),
+                                            extra_info)
             if vd.is_parent:
                 for vdc in [vd.children[id] for id in sorted(vd.children.keys())]:
                     print_pds(4, [pd for pd in vdc.pdisks if not pd.is_dedicated_hs],
