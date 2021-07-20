@@ -1,10 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
+import functools
 import math
 import optparse
 import re
-import sys
 import subprocess
+import sys
 
 ATTR_LOGICAL_CONNECTOR = 1<<6
 ATTR_GLOBAL_HS         = 1<<7
@@ -36,7 +37,7 @@ def bin_str(x, count=0):
     output.  If omitted, as few digits will be used as possible."""
     if count == 0:
         count = int(math.log(x, 2)) + 1
-    return ''.join(map(lambda y:str((x>>y)&1), xrange(count - 1, -1, -1)))
+    return ''.join(map(lambda y:str((x>>y)&1), range(count - 1, -1, -1)))
 
 def human_size(bytes):
     suffixes = ['B  ', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB']
@@ -59,7 +60,7 @@ def get_field(obj, fieldname):
         else:
             return int(f.text)
     if f.attrib['type'] == 'astring':
-        return f.text.decode('string_escape')
+        return f.text
     return f.text
 
 # There are several things in the XML that are represented essentially as
@@ -115,6 +116,7 @@ BusProtocol = EnumClass({
         9: 'PCIe',
     })
 
+@functools.total_ordering
 class Controller:
     def __init__(self, storage_object, controllers):
         assert(769 == get_field(storage_object, 'ObjType'))
@@ -132,13 +134,21 @@ class Controller:
     def __repr__(self):
         return '<Controller(%s)>' % self.id
 
-    def __cmp__(self, other):
-        return cmp(self.controller_num, other.controller_num)
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        return self.controller_num == other.controller_num
+
+    def __lt__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        return self.controller_num < other.controller_num
 
     @property
     def id(self):
         return self.controller_num
 
+@functools.total_ordering
 class VDisk:
     def __init__(self, storage_object, controller_num, controllers, vdisks):
         assert(773 == get_field(storage_object, 'ObjType'))
@@ -180,14 +190,20 @@ class VDisk:
 
         vdisks[self.id] = self
 
-    def __cmp__(self, other):
+    def __eq__(self, other):
         if not isinstance(other, self.__class__):
             return NotImplemented
-        r = cmp(self.controller_num, other.controller_num)
-        if r != 0:
-            return r
-        return cmp(self.logical_drive_num, other.logical_drive_num)
+        return self.sort_key == other.sort_key
 
+    def __lt__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        return self.sort_key < other.sort_key
+
+    @property
+    def sort_key(self):
+        return (self.controller_num, self.logical_drive_num)
+    
     @property
     def id(self):
         return '%s;%s' % (self.controller_num, self.logical_drive_num)
@@ -217,6 +233,7 @@ class VDisk:
         pdisk.vdisk.pdisks.append(pdisk)
     
 
+@functools.total_ordering
 class PDisk:
     def __init__(self, storage_object, controllers, pdisks):
         assert(772 == get_field(storage_object, 'ObjType'))
@@ -250,18 +267,20 @@ class PDisk:
     def __repr__(self):
         return '<Disk(%s)>' % self.id
 
-    def __cmp__(self, other):
-        r = cmp(self.controller_num, other.controller_num)
-        if r != 0:
-            return r
-        r = cmp(self.channel, other.channel)
-        if r != 0:
-            return r
-        r = cmp(self.enclosure_id, other.enclosure_id)
-        if r != 0:
-            return r
-        return cmp(self.target_id, other.target_id)
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        return self.sort_key == other.sort_key
 
+    def __lt__(self, other):
+        if not isinstance(other, self.__class__):
+            return NotImplemented
+        return self.sort_key < other.sort_key
+
+    @property
+    def sort_key(self):
+        return (self.controller_num, self.channel, self.enclosure_id, self.target_id)
+    
     @property
     def id(self):
         return '%s;%s:%s:%s' % (self.controller_num, self.channel, self.enclosure_id, self.target_id)
@@ -296,7 +315,7 @@ for obj in root.find('Controllers').findall('DCStorageObject'):
         Controller(obj, controllers)
 
 if len(controllers) == 0:
-    print >>sys.stdout, 'No controllers found!'
+    print('No controllers found!', file=sys.stdout)
     sys.exit(1)
 
 # Get all of the virtual disks accross all controllers
@@ -351,7 +370,7 @@ def print_pds(indent, pds, prefix=None):
     prefix_printed = False
     for pd in sorted(pds):
         if prefix and not prefix_printed:
-            print '%s%s' % ('  ' * (indent - 1), prefix)
+            print('%s%s' % ('  ' * (indent - 1), prefix))
             prefix_printed = True
         extra_info = ''
         if options.show_bus_protocol:
@@ -362,28 +381,28 @@ def print_pds(indent, pds, prefix=None):
             extra_info += '  %d%%' % pd.progress
         if pd.is_failure_predicted:
             extra_info += '  Failure Predicted'
-        print '%s%s  %s  %s  %s%s' % ('  ' * indent,
+        print('%s%s  %s  %s  %s%s' % ('  ' * indent,
                                       pd.display_id.ljust(id_width + 2 * (max_indent - indent)),
                                       pd.state.name.ljust(state_width),
                                       pd.status.name.ljust(status_width),
                                       human_size(pd.length).rjust(size_length),
-                                      extra_info)
+                                      extra_info))
 
 def print_controllers(controllers):
     for c in sorted(controllers.values()):
-        print '%s (%s)  %s  %s' % (c.name, c.id, c.state.name, c.status.name)
+        print('%s (%s)  %s  %s' % (c.name, c.id, c.state.name, c.status.name))
         for vd in sorted(c.vdisks):
             extra_info = ''
             if vd.progress != None:
                 extra_info += '  %d%%' % vd.progress
             if vd.parent:
                 continue
-            print '  %s (%s) at %s' % (vd.name, vd.display_id, vd.device_name)
-            print '    %s  %s  %s  %s%s' % (vd.layout.name.ljust(id_width + 2 * (max_indent - 2)),
+            print('  %s (%s) at %s' % (vd.name, vd.display_id, vd.device_name))
+            print('    %s  %s  %s  %s%s' % (vd.layout.name.ljust(id_width + 2 * (max_indent - 2)),
                                             vd.state.name.ljust(state_width),
                                             vd.status.name.ljust(status_width),
                                             human_size(vd.length).rjust(size_length),
-                                            extra_info)
+                                            extra_info))
             if vd.is_parent:
                 for vdc in [vd.children[id] for id in sorted(vd.children.keys())]:
                     print_pds(4, [pd for pd in vdc.pdisks if not pd.is_dedicated_hs],
@@ -394,13 +413,13 @@ def print_controllers(controllers):
         print_pds(2, [pd for pd in c.pdisks if pd.is_global_hs], 'Global Spares')
         print_pds(2, [pd for pd in c.pdisks if pd.vdisk == None and not pd.is_global_hs],
                   'Unused')
-        print
+        print()
 
 def print_attribute_masks(disk_list):
     id_len = max([len(d.id) for d in disk_list])
     attr_len = max([int(math.log(d.attributes_mask, 2)) + 1 for d in disk_list])
     for d in disk_list:
-        print d.id.ljust(id_len), bin_str(d.attributes_mask, attr_len)
+        print(d.id.ljust(id_len), bin_str(d.attributes_mask, attr_len))
 
 if options.debug_attribute_masks:
     print_attribute_masks(disk_list)
